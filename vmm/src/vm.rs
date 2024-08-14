@@ -1055,10 +1055,41 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
+    fn load_test_bios(memory_manager: Arc<Mutex<MemoryManager>>) -> Result<EntryPoint> {
+        let mut code: &[u8] = &[
+            0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
+            0xb0, b'\n', /* mov $'\n', %al */
+            0xee,  /* out %al, (%dx) */
+            0xb0, b'h', /* mov $'h', %al */
+            0xee, /* out %al, (%dx) */
+            0xb0, b'i', /* mov $'i', %al */
+            0xee, /* out %al, (%dx) */
+            0xb0, b'!', /* mov $'!', %al */
+            0xee, /* out %al, (%dx) */
+            0xf4, /* hlt */
+        ];
+        let code_size = code.len();
+
+        info!("Loading test BIOS");
+        let mem = {
+            let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
+            guest_memory.memory()
+        };
+        mem.read_exact_volatile_from(GuestAddress(0x1000), &mut code, code_size)
+            .map_err(|e| Error::FirmwareLoad(e))?;
+        Ok(EntryPoint {
+            entry_addr: GuestAddress(0x1000),
+            setup_header: None,
+        })
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn load_bios(mut bios: File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<EntryPoint> {
         use vm_memory::Address;
 
         info!("Loading BIOS");
+        bios.rewind().map_err(|e| Error::FirmwareFile(e))?;
+
         let mem = {
             let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
             guest_memory.memory()
@@ -1068,7 +1099,6 @@ impl Vm {
         let gpa = arch::layout::RAM_64BIT_START
             .checked_sub(bios_size)
             .ok_or(Error::FirmwareTooLarge)?;
-        info!("Base gpa: {:?}", gpa);
         mem.read_exact_volatile_from(gpa, &mut bios, bios_size as usize)
             .map_err(|e| Error::FirmwareLoad(e))?;
 
@@ -1167,6 +1197,7 @@ impl Vm {
             (Some(firmware), None, None, None) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
                 Self::load_bios(firmware, memory_manager)
+                //Self::load_test_bios(memory_manager)
             }
             (None, Some(kernel), _, _) => {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;
