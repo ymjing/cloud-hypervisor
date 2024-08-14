@@ -534,6 +534,8 @@ impl MemoryManager {
         prefault: Option<bool>,
         thp: bool,
     ) -> Result<(Vec<Arc<GuestRegionMmap>>, MemoryZones), Error> {
+        info!("# of ram_regions: {}", ram_regions.len());
+
         let mut zone_iter = zones.iter();
         let mut mem_regions = Vec::new();
         let mut zone = zone_iter.next().ok_or(Error::MissingMemoryZones)?;
@@ -549,10 +551,12 @@ impl MemoryManager {
         memory_zones.insert(zone.id.clone(), MemoryZone::default());
 
         for ram_region in ram_regions.iter() {
+            info!("Processing ram_region: {:?}", ram_region);
             let mut ram_region_offset = 0;
             let mut exit = false;
 
             loop {
+                info!("1");
                 let mut ram_region_consumed = false;
                 let mut pull_next_zone = false;
 
@@ -561,6 +565,10 @@ impl MemoryManager {
                 if ram_region_available_size == 0 {
                     break;
                 }
+                info!(
+                    "2: ram_region_available_size: {}",
+                    ram_region_available_size
+                );
                 let zone_sub_size = zone.size - zone_offset;
 
                 let file_offset = zone_offset;
@@ -569,6 +577,7 @@ impl MemoryManager {
                     .checked_add(ram_region_offset)
                     .ok_or(Error::GuestAddressOverFlow)?;
                 let region_size = if zone_sub_size <= ram_region_available_size {
+                    info!("3.1");
                     if zone_sub_size == ram_region_available_size {
                         ram_region_consumed = true;
                     }
@@ -578,6 +587,7 @@ impl MemoryManager {
 
                     zone_sub_size
                 } else {
+                    info!("3.2");
                     zone_offset += ram_region_available_size;
                     ram_region_consumed = true;
 
@@ -641,6 +651,7 @@ impl MemoryManager {
                 }
 
                 if ram_region_consumed {
+                    info!("breaking becuase ram_region_consumed is true");
                     break;
                 }
             }
@@ -1043,7 +1054,9 @@ impl MemoryManager {
             )
         } else {
             // Init guest memory
+            info!("Init guest memory");
             let arch_mem_regions = arch::arch_memory_regions();
+            info!("RAM Regions: {:?}", arch_mem_regions);
 
             let ram_regions: Vec<(GuestAddress, usize)> = arch_mem_regions
                 .iter()
@@ -1059,6 +1072,7 @@ impl MemoryManager {
                     r_type: *c,
                 })
                 .collect();
+            info!("# of arch_mem_regions: {}", arch_mem_regions.len());
 
             let (mem_regions, mut memory_zones) =
                 Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, config.thp)?;

@@ -1055,6 +1055,30 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
+    fn load_bios(mut bios: File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<EntryPoint> {
+        use vm_memory::Address;
+
+        info!("Loading BIOS");
+        let mem = {
+            let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
+            guest_memory.memory()
+        };
+
+        let bios_size = bios.metadata().map_err(Error::FirmwareFile)?.len();
+        let gpa = arch::layout::RAM_64BIT_START
+            .checked_sub(bios_size)
+            .ok_or(Error::FirmwareTooLarge)?;
+        info!("Base gpa: {:?}", gpa);
+        mem.read_exact_volatile_from(gpa, &mut bios, bios_size as usize)
+            .map_err(|e| Error::FirmwareLoad(e))?;
+
+        Ok(EntryPoint {
+            entry_addr: arch::layout::RAM_64BIT_START.unchecked_sub(0x10), // reset vector
+            setup_header: None,
+        })
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn load_kernel(
         mut kernel: File,
         cmdline: Option<Cmdline>,
@@ -1084,6 +1108,8 @@ impl Vm {
             )
         })
         .map_err(Error::KernelLoad)?;
+
+        eprintln!("Entry addr: {:?}", entry_addr);
 
         if let Some(cmdline) = cmdline {
             linux_loader::loader::load_cmdline(mem.deref(), arch::layout::CMDLINE_START, &cmdline)
@@ -1140,7 +1166,7 @@ impl Vm {
         ) {
             (Some(firmware), None, None, None) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
-                Self::load_kernel(firmware, None, memory_manager)
+                Self::load_bios(firmware, memory_manager)
             }
             (None, Some(kernel), _, _) => {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;

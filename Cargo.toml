@@ -17,6 +17,9 @@ version = "41.0.0"
 # c.) There is a security issue that is addressed by the toolchain update.
 rust-version = "1.77.0"
 
+[profile.dev]
+debug-assertions = false
+
 [profile.release]
 codegen-units = 1
 lto = true

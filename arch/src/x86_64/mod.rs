@@ -916,6 +916,12 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
             layout::MEM_32BIT_RESERVED_START.raw_value() as usize,
             RegionType::Ram,
         ),
+        // Oak Stage 0 ROM image
+        (
+            GuestAddress(0xffe0_0000), // RAM_64BIT_START - 2MB
+            0x20_0000, // 2MB
+            RegionType::Ram,
+        ),
         // 4 GiB ~ inf: memory after the gap
         (layout::RAM_64BIT_START, usize::MAX, RegionType::Ram),
         // 3 GiB ~ 3712 MiB: 32-bit device memory hole
