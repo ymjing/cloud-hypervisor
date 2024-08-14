@@ -58,6 +58,7 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+use hypervisor::kvm::kvm_bindings::KVM_X86_DEFAULT_VM;
 use hypervisor::{HypervisorVmError, VmOps};
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
@@ -505,9 +506,17 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
+        #[cfg(feature = "sev_snp")]
+        let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
+
         #[cfg(not(feature = "igvm"))]
         let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &config)?
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
+            )?
         } else {
             None
         };
@@ -520,8 +529,6 @@ impl Vm {
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
-        #[cfg(feature = "sev_snp")]
-        let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
         #[cfg(feature = "tdx")]
         let force_iommu = tdx_enabled;
         #[cfg(feature = "sev_snp")]
@@ -900,14 +907,22 @@ impl Vm {
                 let vm = hypervisor
                     .create_vm_with_type(u64::from(tdx_enabled))
                     .unwrap();
-            } else if #[cfg(feature = "sev_snp")] {
+            } else if #[cfg(all(feature = "sev_snp", feature = "mshv"))] {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 let vm = hypervisor
                     .create_vm_with_type(u64::from(sev_snp_enabled))
                     .unwrap();
-            } else {
+            } else if #[cfg(all(feature = "sev_snp", feature = "kvm"))] {
+                // Passing KVM_X86_SNP_VM if sev_snp_enabled is true
+                // Otherwise KVM_X86_DEFAULT_VM
+                // FIXME: replace 0x4 with KVM_X86_DEFAULT_VM
+                let vm = hypervisor
+                    .create_vm_with_type(if sev_snp_enabled {0x4} else {KVM_X86_DEFAULT_VM as u64})
+                    .unwrap();
+            }
+            else {
                 let vm = hypervisor.create_vm().unwrap();
             }
         }

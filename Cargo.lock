@@ -986,8 +986,8 @@ dependencies = [
  "iced-x86",
  "igvm",
  "igvm_defs",
- "kvm-bindings",
- "kvm-ioctls",
+ "kvm-bindings 0.9.0",
+ "kvm-ioctls 0.18.0",
  "libc",
  "log",
  "mshv-bindings",
@@ -995,7 +995,7 @@ dependencies = [
  "serde",
  "serde_with",
  "thiserror",
- "vfio-ioctls",
+ "vfio-ioctls 0.2.0 (git+https://github.com/rust-vmm/vfio?rev=refs/pull/54/head)",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -1109,6 +1109,15 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a82e7e8725a39a0015e511a46cc1f7d90cecc180db1610c4d0d4339a9e48bd21"
 dependencies = [
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "kvm-bindings"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3c1030d8ce8a7ac5797738f98d6e16450d2ddd298b4555c492009108822d3bd"
+dependencies = [
  "serde",
  "vmm-sys-util",
  "zerocopy",
@@ -1121,7 +1130,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bedae2ca4a531bebe311abaf9691f5cc14eaa21475243caa2e39c43bb872947d"
 dependencies = [
  "bitflags 2.6.0",
- "kvm-bindings",
+ "kvm-bindings 0.8.1",
+ "libc",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "kvm-ioctls"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92c2176b91f68903b54ac8c6185bada7d607ca6110998976ff15c032f88a7d39"
+dependencies = [
+ "bitflags 2.6.0",
+ "kvm-bindings 0.9.0",
  "libc",
  "vmm-sys-util",
 ]
@@ -1521,8 +1542,8 @@ dependencies = [
  "log",
  "serde",
  "thiserror",
- "vfio-bindings",
- "vfio-ioctls",
+ "vfio-bindings 0.4.0 (git+https://github.com/rust-vmm/vfio?branch=main)",
+ "vfio-ioctls 0.2.0 (git+https://github.com/rust-vmm/vfio?rev=refs/pull/54/head)",
  "vfio_user",
  "vm-allocator",
  "vm-device",
@@ -2240,19 +2261,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfio-bindings"
+version = "0.4.0"
+source = "git+https://github.com/rust-vmm/vfio?rev=refs/pull/54/head#ebfed08e422aa8333c3b2bd8aefe57c41f30738f"
+
+[[package]]
 name = "vfio-ioctls"
 version = "0.2.0"
 source = "git+https://github.com/rust-vmm/vfio?branch=main#64171f3da1af7926adf162ecf545cb05fb9243c9"
 dependencies = [
  "byteorder",
- "kvm-bindings",
- "kvm-ioctls",
+ "kvm-bindings 0.8.1",
+ "kvm-ioctls 0.17.0",
  "libc",
  "log",
  "mshv-bindings",
  "mshv-ioctls",
  "thiserror",
- "vfio-bindings",
+ "vfio-bindings 0.4.0 (git+https://github.com/rust-vmm/vfio?branch=main)",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "vfio-ioctls"
+version = "0.2.0"
+source = "git+https://github.com/rust-vmm/vfio?rev=refs/pull/54/head#ebfed08e422aa8333c3b2bd8aefe57c41f30738f"
+dependencies = [
+ "byteorder",
+ "kvm-bindings 0.9.0",
+ "kvm-ioctls 0.18.0",
+ "libc",
+ "log",
+ "mshv-bindings",
+ "mshv-ioctls",
+ "thiserror",
+ "vfio-bindings 0.4.0 (git+https://github.com/rust-vmm/vfio?rev=refs/pull/54/head)",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -2269,7 +2313,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
- "vfio-bindings",
+ "vfio-bindings 0.4.0 (git+https://github.com/rust-vmm/vfio?branch=main)",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -2406,7 +2450,7 @@ dependencies = [
  "hypervisor",
  "serde",
  "thiserror",
- "vfio-ioctls",
+ "vfio-ioctls 0.2.0 (git+https://github.com/rust-vmm/vfio?branch=main)",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -2473,6 +2517,7 @@ dependencies = [
  "hypervisor",
  "igvm",
  "igvm_defs",
+ "kvm-ioctls 0.18.0",
  "landlock",
  "libc",
  "linux-loader",
@@ -2493,7 +2538,7 @@ dependencies = [
  "thiserror",
  "tracer",
  "uuid",
- "vfio-ioctls",
+ "vfio-ioctls 0.2.0 (git+https://github.com/rust-vmm/vfio?rev=refs/pull/54/head)",
  "vfio_user",
  "virtio-devices",
  "virtio-queue",

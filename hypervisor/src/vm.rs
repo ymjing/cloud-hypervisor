@@ -19,7 +19,7 @@ use crate::cpu::Vcpu;
 use crate::ClockData;
 use crate::UserMemoryRegion;
 use crate::{IoEventAddress, IrqRoutingEntry};
-#[cfg(feature = "sev_snp")]
+#[cfg(all(feature = "igvm", feature = "sev_snp"))]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use std::any::Any;
 #[cfg(target_arch = "x86_64")]
@@ -381,7 +381,7 @@ pub trait Vm: Send + Sync + Any {
     /// Downcast to the underlying hypervisor VM type
     fn as_any(&self) -> &dyn Any;
     /// Import the isolated pages
-    #[cfg(feature = "sev_snp")]
+    #[cfg(all(feature = "mshv", feature = "sev_snp"))]
     fn import_isolated_pages(
         &self,
         _page_type: u32,
@@ -391,7 +391,7 @@ pub trait Vm: Send + Sync + Any {
         unimplemented!()
     }
     /// Complete the isolated import
-    #[cfg(feature = "sev_snp")]
+    #[cfg(all(feature = "igvm", feature = "sev_snp"))]
     fn complete_isolated_import(
         &self,
         _snp_id_block: IGVM_VHS_SNP_ID_BLOCK,
