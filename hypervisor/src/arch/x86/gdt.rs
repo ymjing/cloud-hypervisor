@@ -93,11 +93,11 @@ fn get_type(entry: u64) -> u8 {
 ///
 /// * `entry` - The gdt entry.
 /// * `table_index` - Index of the entry in the gdt table.
-pub fn segment_from_gdt(entry: u64, table_index: u8) -> SegmentRegister {
+pub fn segment_from_gdt(entry: u64, selector: u16) -> SegmentRegister {
     SegmentRegister {
         base: get_base(entry),
         limit: get_limit(entry),
-        selector: (table_index * 8) as u16,
+        selector: selector,
         type_: get_type(entry),
         present: get_p(entry),
         dpl: get_dpl(entry),

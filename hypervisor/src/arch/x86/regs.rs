@@ -9,8 +9,11 @@ pub const EFER_LMA: u64 = 0x400;
 pub const EFER_LME: u64 = 0x100;
 
 // CR0 bits
-pub const CR0_PE: u64 = 0x1;
-pub const CR0_PG: u64 = 0x80000000;
+pub const CR0_PE: u64 = 1;
+pub const CR0_PG: u64 = 1 << 31;
+pub const CR0_ET: u64 = 1 << 4;
+pub const CR0_NW: u64 = 1 << 29;
+pub const CR0_CD: u64 = 1 << 30;
 
 // CR4 bits
 pub const CR4_PAE: u64 = 0x20;

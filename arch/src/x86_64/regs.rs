@@ -11,8 +11,9 @@ use crate::layout::{
 };
 use crate::{EntryPoint, GuestMemoryMmap};
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
-use hypervisor::arch::x86::regs::CR0_PE;
-use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
+use hypervisor::arch::x86::regs::{CR0_CD, CR0_NW, CR0_PE};
+use hypervisor::arch::x86::{FpuState, SegmentRegister, SpecialRegisters, StandardRegisters};
+use linux_loader::loader::bootparam::boot_e820_entry;
 use std::sync::Arc;
 use std::{mem, result};
 use thiserror::Error;
@@ -97,8 +98,9 @@ pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> 
     let regs = match entry_point.setup_header {
         None => StandardRegisters {
             rflags: 0x0000000000000002u64,
-            rip: entry_point.entry_addr.raw_value(),
-            rbx: PVH_INFO_START.raw_value(),
+            //rip: entry_point.entry_addr.raw_value(),
+            rip: 0xfff0,
+            rdx: 0x600, // For oak stage0
             ..Default::default()
         },
         Some(_) => StandardRegisters {
@@ -120,7 +122,9 @@ pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> 
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_sregs(mem: &GuestMemoryMmap, vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
     let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
-    configure_segments_and_sregs(mem, &mut sregs)?;
+    //configure_segments_and_sregs(mem, &mut sregs)?;
+    configure_segments_and_sregs_2(mem, &mut sregs)?; // for Oak stage0
+    info!("FUCK segment registers !!!");
     vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
 }
 
@@ -144,6 +148,39 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
         .map_err(Error::WriteIdt)
 }
 
+pub fn configure_segments_and_sregs_2(
+    _mem: &GuestMemoryMmap,
+    sregs: &mut SpecialRegisters,
+) -> Result<()> {
+    let entry = gdt_entry(0x9a, 0xffff_0000, 0xffff);
+    let boot_cs = segment_from_gdt(entry, 0xf000);
+
+    let entry = gdt_entry(0x93, 0, 0xffff);
+    let boot_ds = segment_from_gdt(entry, 0);
+
+    let entry = gdt_entry(0x92, 0, 0xffff);
+    let boot_ss = segment_from_gdt(entry, 0);
+
+    let entry = gdt_entry(0x83, 0, 0xffff);
+    let boot_tr = segment_from_gdt(entry, 0);
+
+    let entry = gdt_entry(0x82, 0, 0xffff);
+    let boot_ldt = segment_from_gdt(entry, 0);
+
+    sregs.cs = boot_cs;
+    sregs.ds = boot_ds;
+    sregs.es = boot_ds;
+    sregs.fs = boot_ds;
+    sregs.gs = boot_ds;
+    sregs.ss = boot_ss;
+    sregs.tr = boot_tr;
+    sregs.ldt = boot_ldt;
+
+    sregs.cr0 = CR0_PE | CR0_NW | CR0_CD;
+
+    Ok(())
+}
+
 pub fn configure_segments_and_sregs(
     mem: &GuestMemoryMmap,
     sregs: &mut SpecialRegisters,
@@ -158,9 +195,9 @@ pub fn configure_segments_and_sregs(
         ]
     };
 
-    let code_seg = segment_from_gdt(gdt_table[1], 1);
-    let data_seg = segment_from_gdt(gdt_table[2], 2);
-    let tss_seg = segment_from_gdt(gdt_table[3], 3);
+    let code_seg = segment_from_gdt(gdt_table[1], 1 << 3);
+    let data_seg = segment_from_gdt(gdt_table[2], 2 << 3);
+    let tss_seg = segment_from_gdt(gdt_table[3], 3 << 3);
 
     // Write segments
     write_gdt_table(&gdt_table[..], mem)?;
