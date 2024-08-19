@@ -446,6 +446,31 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::UnregisterIrqFd(e.into()))
     }
 
+    #[cfg(feature = "sev_snp")]
+    fn sev_snp_init(&self) -> vm::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn import_isolated_pages(
+        &self,
+        _page_type: u32,
+        _page_size: u32,
+        _pages: &[u64],
+    ) -> vm::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn complete_isolated_import(
+        &self,
+        _snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
+        _host_data: [u8; 32],
+        _id_block_enabled: u8,
+    ) -> vm::Result<()> {
+        Ok(())
+    }
+
     ///
     /// Creates a VcpuFd object from a vcpu RawFd.
     ///
@@ -2437,6 +2462,12 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn set_sev_control_register(&self, _reg: u64) -> cpu::Result<()> {
+        // TODO: Read "SEV Control Register" from VMSA PFN; and then set KVM SEV control register
+        Ok(())
     }
 }
 

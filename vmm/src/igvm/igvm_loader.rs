@@ -172,7 +172,6 @@ pub fn load_igvm(
 
     for header in igvm_file.directives() {
         debug_assert!(header.compatibility_mask().unwrap_or(mask) & mask == mask);
-
         match header {
             IgvmDirectiveHeader::PageData {
                 gpa,
@@ -205,6 +204,7 @@ pub fn load_igvm(
                         }
                     }
                     IgvmPageDataType::SECRETS => {
+                        info!("PageData - SECRETS - GPA: 0x{:x}", *gpa);
                         gpas.push(GpaPages {
                             gpa: *gpa,
                             page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
@@ -213,11 +213,13 @@ pub fn load_igvm(
                         BootPageAcceptance::SecretsPage
                     }
                     IgvmPageDataType::CPUID_DATA => {
+                        info!("PageData - CPUID - GPA: 0x{:x}", *gpa);
                         // SAFETY: CPUID is readonly
-                        unsafe {
+                        /*unsafe {
                             let cpuid_page_p: *mut hv_psp_cpuid_page =
                                 data.as_ptr() as *mut hv_psp_cpuid_page; // as *mut hv_psp_cpuid_page;
                             let cpuid_page: &mut hv_psp_cpuid_page = &mut *cpuid_page_p;
+                            // FIXME: use KVM data structure to process CPUID_DATA
                             for i in 0..cpuid_page.count {
                                 let leaf = cpuid_page.cpuid_leaf_info[i as usize];
                                 let mut in_leaf = cpu_manager
@@ -239,7 +241,7 @@ pub fn load_igvm(
                                 cpuid_page.cpuid_leaf_info[i as usize].ecx_out = in_leaf[2];
                                 cpuid_page.cpuid_leaf_info[i as usize].edx_out = in_leaf[3];
                             }
-                        }
+                        }*/
                         gpas.push(GpaPages {
                             gpa: *gpa,
                             page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
@@ -321,6 +323,7 @@ pub fn load_igvm(
                 vp_index,
                 vmsa,
             } => {
+                info!("Load SnpVpContext: gpa: 0x{:x}", gpa);
                 assert_eq!(gpa % HV_PAGE_SIZE, 0);
                 let mut data: [u8; 4096] = [0; 4096];
                 let len = size_of::<SevVmsa>();

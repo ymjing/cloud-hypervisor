@@ -104,7 +104,7 @@ impl Loader {
             .memory()
             .write(data, GuestAddress(page_base * HV_PAGE_SIZE))
             .map_err(|_e| {
-                debug!("Importing pages failed due to MemoryError");
+                info!("Importing pages failed due to MemoryError, {:?}", _e);
                 Error::MemoryUnavailable
             })?;
 

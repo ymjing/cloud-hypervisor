@@ -905,7 +905,7 @@ impl Vm {
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 let vm = hypervisor
-                    .create_vm_with_type(u64::from(sev_snp_enabled))
+                    .create_vm_with_type(if sev_snp_enabled {0x4} else {0x0})
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
@@ -1015,6 +1015,20 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        // FIXME: move this Oak/OVMF specific code to somewhere
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        {
+            let mut memory_manager = memory_manager.lock().unwrap();
+            // Region for loading Stage 0;
+            memory_manager
+                .add_ram_region(GuestAddress(0xffe0_0000), 0x20_0000)
+                .map_err(|e| Error::MemoryManager(e))?;
+            // Region for loading the VMSA page
+            memory_manager
+                .add_ram_region(GuestAddress(0xffff_ffff_f000), 0x1000)
+                .map_err(|e| Error::MemoryManager(e))?;
+        }
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -1024,6 +1038,11 @@ impl Vm {
             host_data,
         )
         .map_err(Error::IgvmLoad)?;
+
+        info!(
+            "Igvm Loaded: vmsa_gpa: 0x{:x}, rip: 0x{:x}",
+            res.vmsa_gpa, res.vmsa.rip
+        );
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "sev_snp")] {
@@ -2072,7 +2091,8 @@ impl Vm {
                     // In case of SEV-SNP guest ACPI tables are provided via
                     // IGVM. So skip the creation of ACPI tables and set the
                     // rsdp addr to None.
-                    None
+                    // None
+                    self.create_acpi_tables() // FIXME: use IGVM-provided ACPI table
                 } else {
                     self.create_acpi_tables()
                 };
