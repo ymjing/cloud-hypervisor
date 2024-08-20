@@ -227,27 +227,6 @@ pub struct KvmTdxExitVmcall {
     pub out_rdx: u64,
 }
 
-impl From<kvm_userspace_memory_region> for UserMemoryRegion {
-    fn from(region: kvm_userspace_memory_region) -> Self {
-        let mut flags = USER_MEMORY_REGION_READ;
-        if region.flags & KVM_MEM_READONLY == 0 {
-            flags |= USER_MEMORY_REGION_WRITE;
-        }
-        if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
-            flags |= USER_MEMORY_REGION_LOG_DIRTY;
-        }
-
-        UserMemoryRegion {
-            slot: region.slot,
-            guest_phys_addr: region.guest_phys_addr,
-            memory_size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            ..Default::default()
-        }
-    }
-}
-
 impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
     fn from(region: kvm_userspace_memory_region2) -> Self {
         let mut flags = USER_MEMORY_REGION_READ;
@@ -266,31 +245,6 @@ impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
             flags,
             guest_memfd: region.guest_memfd,
             guest_memfd_offset: region.guest_memfd_offset,
-        }
-    }
-}
-
-impl From<UserMemoryRegion> for kvm_userspace_memory_region {
-    fn from(region: UserMemoryRegion) -> Self {
-        assert!(
-            region.flags & USER_MEMORY_REGION_READ != 0,
-            "KVM mapped memory is always readable"
-        );
-
-        let mut flags = 0;
-        if region.flags & USER_MEMORY_REGION_WRITE == 0 {
-            flags |= KVM_MEM_READONLY;
-        }
-        if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
-        }
-
-        kvm_userspace_memory_region {
-            slot: region.slot,
-            guest_phys_addr: region.guest_phys_addr,
-            memory_size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
         }
     }
 }
@@ -426,7 +380,7 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
-    memfd: Option<OwnedFd>,
+    memfd: Arc<OwnedFd>,
     #[cfg(feature = "sev_snp")]
     snp: Arc<SnpFd>,
 }
@@ -715,28 +669,17 @@ impl vm::Vm for KvmVm {
             } else {
                 0
             };
-        if let Some(memfd) = &self.memfd {
-            kvm_userspace_memory_region2 {
-                slot,
-                guest_phys_addr,
-                memory_size,
-                userspace_addr,
-                flags,
-                guest_memfd: memfd.as_raw_fd() as u32,
-                guest_memfd_offset: guest_phys_addr,
-                ..Default::default()
-            }
-            .into()
-        } else {
-            kvm_userspace_memory_region {
-                slot,
-                guest_phys_addr,
-                memory_size,
-                userspace_addr,
-                flags,
-            }
-            .into()
+        kvm_userspace_memory_region2 {
+            slot,
+            guest_phys_addr,
+            memory_size,
+            userspace_addr,
+            flags,
+            guest_memfd: self.memfd.as_raw_fd() as u32,
+            guest_memfd_offset: guest_phys_addr,
+            ..Default::default()
         }
+        .into()
     }
     ///
     /// Creates a guest physical memory region.
@@ -1174,12 +1117,14 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         let vm_fd = Arc::new(fd);
 
+        info!("Creating memfd");
         let gmem = kvm_create_guest_memfd {
             size: 1 << 48,
             ..Default::default()
         };
         let memfd = vm_fd
             .create_guest_memfd(gmem)
+            .context("Failed to create memfd")
             .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
         let memfd = unsafe { OwnedFd::from_raw_fd(memfd) };
 
@@ -1222,7 +1167,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     fd: vm_fd,
                     msrs,
                     dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    memfd: Some(memfd),
+                    memfd: Arc::new(memfd),
                     snp: Arc::new(snp),
                 }))
             }
