@@ -905,7 +905,7 @@ impl Vm {
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 let vm = hypervisor
-                    .create_vm_with_type(if sev_snp_enabled {0x4} else {0x0})
+                    .create_vm_with_type(u64::from(sev_snp_enabled))
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();

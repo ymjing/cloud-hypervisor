@@ -62,6 +62,8 @@ use kvm_bindings::{
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
+#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+pub use x86_64::snp::SnpFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 // aarch64 dependencies
@@ -71,8 +73,9 @@ pub use kvm_bindings;
 pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
     kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
-    KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
-    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    kvm_userspace_memory_region2, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP,
+    KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
+    KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -367,6 +370,8 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
+    #[cfg(feature = "sev_snp")]
+    snp: Arc<SnpFd>,
 }
 
 impl KvmVm {
@@ -448,7 +453,10 @@ impl vm::Vm for KvmVm {
 
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self) -> vm::Result<()> {
-        Ok(())
+        // KVM_SEV_SNP_LAUNCH_START
+        self.snp
+            .launch_start(&self.fd)
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
     }
 
     #[cfg(feature = "sev_snp")]
@@ -456,8 +464,12 @@ impl vm::Vm for KvmVm {
         &self,
         _page_type: u32,
         _page_size: u32,
-        _pages: &[u64],
+        pages: &[u64],
     ) -> vm::Result<()> {
+        if pages.is_empty() {
+            return Ok(());
+        }
+
         Ok(())
     }
 
@@ -1048,6 +1060,19 @@ impl hypervisor::Hypervisor for KvmHypervisor {
     /// ```
     fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let fd: VmFd;
+        #[cfg(feature = "sev_snp")]
+        let vm_type = if vm_type == 0 {
+            0 /* KVM_X86_DEFAULT_VM */
+        } else {
+            4 /* KVM_X86_SNP_VM  */ // TODO: use kvm_bindings when it's updated to match 6.11
+        };
+        #[cfg(feature = "tdx")]
+        let vm_type = if vm_type == 0 {
+            0 /* KVM_X86_DEFAULT_VM */
+        } else {
+            3 /* KVM_X86_TDX_VM  */
+        };
+
         loop {
             match self.kvm.create_vm_with_type(vm_type) {
                 Ok(res) => fd = res,
@@ -1082,11 +1107,31 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 msrs[pos].index = *index;
             }
 
-            Ok(Arc::new(KvmVm {
-                fd: vm_fd,
-                msrs,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-            }))
+            #[cfg(not(feature = "sev_snp"))]
+            {
+                Ok(Arc::new(KvmVm {
+                    fd: vm_fd,
+                    msrs,
+                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                }))
+            }
+            #[cfg(feature = "sev_snp")]
+            {
+                let snp =
+                    SnpFd::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                if vm_type == 4
+                /* KVM_X86_SNP_VM */
+                {
+                    snp.init2(&vm_fd)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                }
+                Ok(Arc::new(KvmVm {
+                    fd: vm_fd,
+                    msrs,
+                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                    snp: Arc::new(snp),
+                }))
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
