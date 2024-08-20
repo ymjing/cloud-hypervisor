@@ -125,6 +125,10 @@ pub struct UserMemoryRegion {
     pub memory_size: u64,
     pub userspace_addr: u64,
     pub flags: u32,
+    #[cfg(feature = "kvm")]
+    pub guest_memfd: u32,
+    #[cfg(feature = "kvm")]
+    pub guest_memfd_offset: u64,
 }
 
 ///

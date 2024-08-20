@@ -29,6 +29,8 @@ use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
+use std::os::fd::FromRawFd;
+use std::os::fd::OwnedFd;
 #[cfg(target_arch = "x86_64")]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
@@ -69,13 +71,14 @@ pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
+use anyhow::Context;
 pub use kvm_bindings;
 pub use kvm_bindings::{
-    kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
-    kvm_userspace_memory_region2, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP,
-    KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY,
-    KVM_MSI_VALID_DEVID,
+    kvm_clock_data, kvm_create_device, kvm_create_guest_memfd, kvm_device_type_KVM_DEV_TYPE_VFIO,
+    kvm_guest_debug, kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state,
+    kvm_userspace_memory_region, kvm_userspace_memory_region2, KVM_GUESTDBG_ENABLE,
+    KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES,
+    KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -240,6 +243,29 @@ impl From<kvm_userspace_memory_region> for UserMemoryRegion {
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
+    fn from(region: kvm_userspace_memory_region2) -> Self {
+        let mut flags = USER_MEMORY_REGION_READ;
+        if region.flags & KVM_MEM_READONLY == 0 {
+            flags |= USER_MEMORY_REGION_WRITE;
+        }
+        if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
+            flags |= USER_MEMORY_REGION_LOG_DIRTY;
+        }
+
+        UserMemoryRegion {
+            slot: region.slot,
+            guest_phys_addr: region.guest_phys_addr,
+            memory_size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags,
+            guest_memfd: region.guest_memfd,
+            guest_memfd_offset: region.guest_memfd_offset,
         }
     }
 }
@@ -265,6 +291,34 @@ impl From<UserMemoryRegion> for kvm_userspace_memory_region {
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
+        }
+    }
+}
+
+impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
+    fn from(region: UserMemoryRegion) -> Self {
+        assert!(
+            region.flags & USER_MEMORY_REGION_READ != 0,
+            "KVM mapped memory is always readable"
+        );
+
+        let mut flags = 0;
+        if region.flags & USER_MEMORY_REGION_WRITE == 0 {
+            flags |= KVM_MEM_READONLY;
+        }
+        if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
+            flags |= KVM_MEM_LOG_DIRTY_PAGES;
+        }
+
+        kvm_userspace_memory_region2 {
+            slot: region.slot,
+            guest_phys_addr: region.guest_phys_addr,
+            memory_size: region.memory_size,
+            userspace_addr: region.userspace_addr,
+            flags,
+            guest_memfd: region.guest_memfd,
+            guest_memfd_offset: region.guest_memfd_offset,
+            ..Default::default()
         }
     }
 }
@@ -362,6 +416,8 @@ struct KvmDirtyLogSlot {
     guest_phys_addr: u64,
     memory_size: u64,
     userspace_addr: u64,
+    guest_memfd: u32,
+    guest_memfd_offset: u64,
 }
 
 /// Wrapper over KVM VM ioctls.
@@ -370,6 +426,7 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
+    memfd: Option<OwnedFd>,
     #[cfg(feature = "sev_snp")]
     snp: Arc<SnpFd>,
 }
@@ -386,6 +443,7 @@ impl KvmVm {
             .map_err(|e| vm::HypervisorVmError::CreateDevice(e.into()))?;
         Ok(VfioDeviceFd::new_from_kvm(device_fd))
     }
+
     /// Checks if a particular `Cap` is available.
     pub fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
@@ -651,26 +709,40 @@ impl vm::Vm for KvmVm {
         readonly: bool,
         log_dirty_pages: bool,
     ) -> UserMemoryRegion {
-        kvm_userspace_memory_region {
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            flags: if readonly { KVM_MEM_READONLY } else { 0 }
-                | if log_dirty_pages {
-                    KVM_MEM_LOG_DIRTY_PAGES
-                } else {
-                    0
-                },
+        let flags = if readonly { KVM_MEM_READONLY } else { 0 }
+            | if log_dirty_pages {
+                KVM_MEM_LOG_DIRTY_PAGES
+            } else {
+                0
+            };
+        if let Some(memfd) = &self.memfd {
+            kvm_userspace_memory_region2 {
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                flags,
+                guest_memfd: memfd.as_raw_fd() as u32,
+                guest_memfd_offset: guest_phys_addr,
+                ..Default::default()
+            }
+            .into()
+        } else {
+            kvm_userspace_memory_region {
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                flags,
+            }
+            .into()
         }
-        .into()
     }
-
     ///
     /// Creates a guest physical memory region.
     ///
     fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let mut region: kvm_userspace_memory_region = user_memory_region.into();
+        let mut region: kvm_userspace_memory_region2 = user_memory_region.into();
 
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
             if (region.flags & KVM_MEM_READONLY) != 0 {
@@ -687,6 +759,8 @@ impl vm::Vm for KvmVm {
                     guest_phys_addr: region.guest_phys_addr,
                     memory_size: region.memory_size,
                     userspace_addr: region.userspace_addr,
+                    guest_memfd: region.guest_memfd,
+                    guest_memfd_offset: region.guest_memfd_offset,
                 },
             );
 
@@ -698,7 +772,7 @@ impl vm::Vm for KvmVm {
         // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
-                .set_user_memory_region(region)
+                .set_user_memory_region2(region)
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))
         }
     }
@@ -707,7 +781,7 @@ impl vm::Vm for KvmVm {
     /// Removes a guest physical memory region.
     ///
     fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let mut region: kvm_userspace_memory_region = user_memory_region.into();
+        let mut region: kvm_userspace_memory_region2 = user_memory_region.into();
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots.write().unwrap().remove(&region.slot);
@@ -717,7 +791,7 @@ impl vm::Vm for KvmVm {
         // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
             self.fd
-                .set_user_memory_region(region)
+                .set_user_memory_region2(region)
                 .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))
         }
     }
@@ -798,17 +872,21 @@ impl vm::Vm for KvmVm {
     fn start_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = kvm_userspace_memory_region {
+            let region = kvm_userspace_memory_region2 {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
                 flags: KVM_MEM_LOG_DIRTY_PAGES,
+                guest_memfd: s.guest_memfd,
+                guest_memfd_offset: s.guest_memfd_offset,
+                pad1: 0u32,
+                pad2: [0u64; 14],
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
                 self.fd
-                    .set_user_memory_region(region)
+                    .set_user_memory_region2(region)
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
@@ -822,17 +900,21 @@ impl vm::Vm for KvmVm {
     fn stop_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = kvm_userspace_memory_region {
+            let region = kvm_userspace_memory_region2 {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
                 flags: 0,
+                guest_memfd: s.guest_memfd,
+                guest_memfd_offset: s.guest_memfd_offset,
+                pad1: 0u32,
+                pad2: [0u64; 14],
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
                 self.fd
-                    .set_user_memory_region(region)
+                    .set_user_memory_region2(region)
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
@@ -1092,6 +1174,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         let vm_fd = Arc::new(fd);
 
+        let gmem = kvm_create_guest_memfd {
+            size: 1 << 48,
+            ..Default::default()
+        };
+        let memfd = vm_fd
+            .create_guest_memfd(gmem)
+            .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+        let memfd = unsafe { OwnedFd::from_raw_fd(memfd) };
+
         #[cfg(target_arch = "x86_64")]
         {
             let msr_list = self.get_msr_list()?;
@@ -1113,12 +1204,14 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     fd: vm_fd,
                     msrs,
                     dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                    memfd: Some(memfd),
                 }))
             }
             #[cfg(feature = "sev_snp")]
             {
-                let snp =
-                    SnpFd::new().map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                let snp = SnpFd::new()
+                    .context("Failed to open SEV device")
+                    .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
                 if vm_type == 4
                 /* KVM_X86_SNP_VM */
                 {
@@ -1129,6 +1222,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     fd: vm_fd,
                     msrs,
                     dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                    memfd: Some(memfd),
                     snp: Arc::new(snp),
                 }))
             }
