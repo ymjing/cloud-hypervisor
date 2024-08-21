@@ -148,6 +148,7 @@ pub fn configure_segments_and_sregs(
     mem: &GuestMemoryMmap,
     sregs: &mut SpecialRegisters,
 ) -> Result<()> {
+    info!("configure_segments_and_sregs should NOT be called when using IGVM?");
     let gdt_table: [u64; BOOT_GDT_MAX] = {
         // Configure GDT entries as specified by PVH boot protocol
         [

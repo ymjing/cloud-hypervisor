@@ -524,7 +524,6 @@ impl vm::Vm for KvmVm {
                 kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
             )
             .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
-
             self.snp
                 .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
                 .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
@@ -2619,6 +2618,8 @@ impl cpu::Vcpu for KvmVcpu {
         // FIXME: read registers from VMSA page
         //let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
 
+        info!("set_sev_control_registers");
+
         // https://github.com/qemu/qemu/blob/master/target/i386/cpu.h
         const DESC_G_SHIFT: usize = 23;
         const DESC_G_MASK: u32 = 1 << DESC_G_SHIFT;
@@ -2663,15 +2664,7 @@ impl cpu::Vcpu for KvmVcpu {
         sregs.gs = make_segment(0, 0xffff, 0, 0x93);
         sregs.ss = make_segment(0, 0xffff, 0, 0x93);
         sregs.tr = make_segment(0, 0xffff, 0, 0x8b);
-        sregs.ldt = make_segment(0, 0xffff, 0, 0);
-        sregs.gdt = kvm_bindings::kvm_dtable {
-            limit: 0xffff,
-            ..Default::default()
-        };
-        sregs.idt = kvm_bindings::kvm_dtable {
-            limit: 0xffff,
-            ..Default::default()
-        };
+
         sregs.cr0 = 0x10;
         sregs.cr4 = 0x40;
 

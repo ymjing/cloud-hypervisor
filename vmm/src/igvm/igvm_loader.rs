@@ -3,6 +3,7 @@
 // Copyright © 2023, Microsoft Corporation
 //
 use crate::cpu::CpuManager;
+use vm_memory::GuestAddress;
 use zerocopy::AsBytes;
 
 use crate::igvm::{
@@ -77,6 +78,8 @@ pub enum Error {
     FailedToDecodeHostData(#[source] hex::FromHexError),
     #[error("Error applying VMSA to vCPU registers: {0}")]
     SetVmsa(#[source] crate::cpu::Error),
+    #[error("Error mapping mem regions")]
+    MemoryManager,
 }
 
 #[allow(dead_code)]
@@ -196,6 +199,21 @@ pub fn load_igvm(
     };
 
     let mut loader = Loader::new(memory);
+
+    // FIXME: use IGVM to provide address information?
+    // This should be part of the boot ram and reported in the E820 table.
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+    {
+        let mut memory_manager = memory_manager.lock().unwrap();
+        // Region for loading Stage 0;
+        memory_manager
+            .add_ram_region(GuestAddress(0xffe0_0000), 0x20_0000)
+            .map_err(|_| Error::MemoryManager)?;
+        // Region for loading the VMSA page
+        memory_manager
+            .add_ram_region(GuestAddress(0xffff_ffff_f000), 0x1000)
+            .map_err(|_| Error::MemoryManager)?;
+    }
 
     let mut parameter_areas: HashMap<u32, ParameterAreaState> = HashMap::new();
 

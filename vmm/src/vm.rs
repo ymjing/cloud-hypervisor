@@ -1027,20 +1027,6 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
-        // FIXME: move this Oak/OVMF specific code to somewhere
-        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
-        {
-            let mut memory_manager = memory_manager.lock().unwrap();
-            // Region for loading Stage 0;
-            memory_manager
-                .add_ram_region(GuestAddress(0xffe0_0000), 0x20_0000)
-                .map_err(|e| Error::MemoryManager(e))?;
-            // Region for loading the VMSA page
-            memory_manager
-                .add_ram_region(GuestAddress(0xffff_ffff_f000), 0x1000)
-                .map_err(|e| Error::MemoryManager(e))?;
-        }
-
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
