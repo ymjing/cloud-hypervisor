@@ -1937,6 +1937,7 @@ impl vm::Vm for MshvVm {
         page_type: u32,
         page_size: u32,
         pages: &[u64],
+        _uaddrs: &[u64],
     ) -> vm::Result<()> {
         if pages.is_empty() {
             return Ok(());

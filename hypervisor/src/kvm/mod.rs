@@ -499,6 +499,7 @@ impl vm::Vm for KvmVm {
         page_type: u32,
         page_size: u32,
         pfns: &[u64],
+        uaddrs: &[u64],
     ) -> vm::Result<()> {
         if pfns.is_empty() {
             return Ok(());
@@ -510,20 +511,22 @@ impl vm::Vm for KvmVm {
             pfns[0],
             pfns.len(),
         );
-        let total_size = (pfns.len() * page_size as usize) as u64;
 
-        info!("Setting pages to private");
-        self.set_memory_attributes(
-            pfns[0] << 12,
-            total_size,
-            kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
-        )
-        .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        assert_eq!(pfns.len(), uaddrs.len());
 
-        info!("Calling KVM_SEV_SNP_LAUNCH_UPDATE");
-        self.snp
-            .launch_update(&self.fd, 0, total_size, pfns[0], page_type)
+        for (pfn, uaddr) in pfns.iter().zip(uaddrs.iter()) {
+            self.set_memory_attributes(
+                *pfn << 12,
+                page_size as u64,
+                kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+            )
             .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+
+            self.snp
+                .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        }
+
         info!("KVM_SEV_SNP_LAUNCH_UPDATE done");
         Ok(())
     }

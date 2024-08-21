@@ -451,6 +451,7 @@ pub fn load_igvm(
     #[cfg(feature = "sev_snp")]
     {
         use std::time::Instant;
+        use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 
         let mut now = Instant::now();
 
@@ -484,11 +485,24 @@ pub fn load_igvm(
                 .iter()
                 .map(|gpa| gpa.gpa >> ISOLATED_PAGE_SHIFT)
                 .collect();
+
+            let guest_memory = memory_manager.lock().unwrap().guest_memory().memory();
+            let uaddrs: Vec<_> = group
+                .iter()
+                .map(|gpa| {
+                    let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
+                    let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64; // FIXME: remove unwrap
+                    let uaddr_offset: u64 = guest_region_mmap.unwrap().1 .0; // FIXME: remove unwrap
+                    let uaddr = uaddr_base + uaddr_offset;
+                    uaddr
+                })
+                .collect();
+
             memory_manager
                 .lock()
                 .unwrap()
                 .vm
-                .import_isolated_pages(group[0].page_type, ISOLATED_PAGE_SIZE, &pfns)
+                .import_isolated_pages(group[0].page_type, ISOLATED_PAGE_SIZE, &pfns, &uaddrs)
                 .map_err(Error::ImportIsolatedPages)?;
         }
 
