@@ -140,10 +140,7 @@ impl SnpFd {
         vm.encrypt_op_sev(&mut sev_cmd)
     }
 
-    pub(crate) fn launch_finish(
-        &self,
-        vm: &VmFd,
-    ) -> Result<()> {
+    pub(crate) fn launch_finish(&self, vm: &VmFd) -> Result<()> {
         let mut finish = KvmSevSnpLaunchFinish::default();
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_SNP_LAUNCH_FINISH,

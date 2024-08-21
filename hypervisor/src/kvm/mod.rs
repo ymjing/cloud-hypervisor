@@ -53,7 +53,8 @@ use crate::arch::x86::{
 use crate::ClockData;
 use crate::{
     CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_MEMFD, USER_MEMORY_REGION_READ,
+    USER_MEMORY_REGION_WRITE,
 };
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register, StandardRegisters};
@@ -237,7 +238,7 @@ impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
             flags |= USER_MEMORY_REGION_LOG_DIRTY;
         }
         if region.flags & KVM_MEM_GUEST_MEMFD != 0 {
-            flags |= KVM_MEM_GUEST_MEMFD;
+            flags |= USER_MEMORY_REGION_MEMFD;
         }
 
         UserMemoryRegion {
@@ -266,7 +267,7 @@ impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
         if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
-        if region.flags & KVM_MEM_GUEST_MEMFD != 0 {
+        if region.flags & USER_MEMORY_REGION_MEMFD != 0 {
             flags |= KVM_MEM_GUEST_MEMFD;
         }
 
@@ -767,6 +768,8 @@ impl vm::Vm for KvmVm {
             // For regions that need this flag, dirty pages log will be turned on in `start_dirty_log`.
             region.flags = 0;
         }
+
+        region.flags |= KVM_MEM_GUEST_MEMFD;
 
         // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
