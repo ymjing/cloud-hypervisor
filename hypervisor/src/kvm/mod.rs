@@ -465,7 +465,8 @@ impl vm::Vm for KvmVm {
 
     #[cfg(feature = "sev_snp")]
     fn sev_snp_init(&self) -> vm::Result<()> {
-        // KVM_SEV_SNP_LAUNCH_START
+        // TODO: get policy from IGVM
+        info!("Calling KVM_SEV_SNP_LAUNCH_START");
         self.snp
             .launch_start(&self.fd)
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
@@ -474,14 +475,18 @@ impl vm::Vm for KvmVm {
     #[cfg(feature = "sev_snp")]
     fn import_isolated_pages(
         &self,
-        _page_type: u32,
-        _page_size: u32,
+        page_type: u32,
+        page_size: u32,
         pages: &[u64],
     ) -> vm::Result<()> {
         if pages.is_empty() {
             return Ok(());
         }
-
+        info!("Calling KVM_SEV_SNP_LAUNCH_UPDATE");
+        let total_size = (pages.len() * page_size as usize) as u64;
+        self.snp
+            .launch_update(&self.fd, 0, total_size, pages[0], page_type)
+            .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
         Ok(())
     }
 
@@ -492,6 +497,19 @@ impl vm::Vm for KvmVm {
         _host_data: [u8; 32],
         _id_block_enabled: u8,
     ) -> vm::Result<()> {
+        info!("Calling KVM_SEV_SNP_LAUNCH_FINISH");
+        // TODO: assign SNP ID block
+        /*let id_key_alg = snp_id_block.id_key_algorithm;
+        let author_key_alg = snp_id_block.author_key_algorithm;
+        let id_block_signature_r = snp_id_block.id_key_signature.r_comp.as_ref();
+        let id_block_signature_s = snp_id_block.id_key_signature.s_comp.as_ref();
+        let id_pubkey_curve = snp_id_block.id_public_key.curve.to_le_bytes().as_ref();
+        let id_pubkey_qx = snp_id_block.id_public_key.qx.as_ref();
+        let id_pubkey_qy = snp_id_block.id_public_key.qy.as_ref();*/
+
+        self.snp
+            .launch_finish(&self.fd)
+            .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))?;
         Ok(())
     }
 
@@ -1160,6 +1178,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 if vm_type == 4
                 /* KVM_X86_SNP_VM */
                 {
+                    info!("Calling SEV_SNP_INIT2");
                     snp.init2(&vm_fd)
                         .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
                 }

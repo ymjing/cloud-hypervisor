@@ -119,16 +119,16 @@ impl SnpFd {
     pub(crate) fn launch_update(
         &self,
         vm: &VmFd,
-        host_va: u64,
+        hva: u64,
         size: u64,
-        gpa: u64,
-        page_type: u8,
+        gfn_start: u64,
+        page_type: u32,
     ) -> Result<()> {
         let mut update = KvmSevSnpLaunchUpdate {
-            gfn_start: gpa >> 12,
-            uaddr: host_va,
+            gfn_start,
+            uaddr: hva,
             len: size,
-            type_: page_type,
+            type_: page_type as u8,
             ..Default::default()
         };
         let mut sev_cmd = kvm_sev_cmd {
@@ -140,7 +140,10 @@ impl SnpFd {
         vm.encrypt_op_sev(&mut sev_cmd)
     }
 
-    pub(crate) fn launch_finish(&self, vm: &VmFd) -> Result<()> {
+    pub(crate) fn launch_finish(
+        &self,
+        vm: &VmFd,
+    ) -> Result<()> {
         let mut finish = KvmSevSnpLaunchFinish::default();
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_SNP_LAUNCH_FINISH,
