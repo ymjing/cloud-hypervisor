@@ -172,6 +172,11 @@ pub enum HypervisorVmError {
     #[error("Failed to write to IO Bus: {0}")]
     IoBusWrite(#[source] anyhow::Error),
     ///
+    /// Set memory attributes
+    ///
+    #[error("Failed to set memory attributes: {0}")]
+    SetMemoryAttributes(#[source] anyhow::Error),
+    ///
     /// Start dirty log error
     ///
     #[error("Failed to get dirty log: {0}")]

@@ -77,8 +77,8 @@ pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_create_guest_memfd, kvm_device_type_KVM_DEV_TYPE_VFIO,
     kvm_guest_debug, kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state,
     kvm_userspace_memory_region, kvm_userspace_memory_region2, KVM_GUESTDBG_ENABLE,
-    KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES,
-    KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_GUEST_MEMFD,
+    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -236,6 +236,9 @@ impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
         if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
             flags |= USER_MEMORY_REGION_LOG_DIRTY;
         }
+        if region.flags & KVM_MEM_GUEST_MEMFD != 0 {
+            flags |= KVM_MEM_GUEST_MEMFD;
+        }
 
         UserMemoryRegion {
             slot: region.slot,
@@ -262,6 +265,9 @@ impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
         }
         if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
+        }
+        if region.flags & KVM_MEM_GUEST_MEMFD != 0 {
+            flags |= KVM_MEM_GUEST_MEMFD;
         }
 
         kvm_userspace_memory_region2 {
@@ -402,6 +408,20 @@ impl KvmVm {
     pub fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
     }
+
+    #[cfg(feature = "sev_snp")]
+    pub fn set_memory_attributes(&self, gpa: u64, size: u64, attributes: u64) -> vm::Result<()> {
+        use kvm_bindings::kvm_memory_attributes;
+        let mem_attributes = kvm_memory_attributes {
+            address: gpa,
+            size,
+            attributes,
+            ..Default::default()
+        };
+        self.fd
+            .set_memory_attributes(mem_attributes)
+            .map_err(|e| vm::HypervisorVmError::SetMemoryAttributes(e.into()))
+    }
 }
 
 /// Implementation of Vm trait for KVM
@@ -477,16 +497,33 @@ impl vm::Vm for KvmVm {
         &self,
         page_type: u32,
         page_size: u32,
-        pages: &[u64],
+        pfns: &[u64],
     ) -> vm::Result<()> {
-        if pages.is_empty() {
+        if pfns.is_empty() {
             return Ok(());
         }
+        info!(
+            "page_type: {}, page_size: 0x{:x}, pfn_start: 0x{:x}, # of pages: {}",
+            page_type,
+            page_size,
+            pfns[0],
+            pfns.len(),
+        );
+        let total_size = (pfns.len() * page_size as usize) as u64;
+
+        info!("Setting pages to private");
+        self.set_memory_attributes(
+            pfns[0] << 12,
+            total_size,
+            kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+        )
+        .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+
         info!("Calling KVM_SEV_SNP_LAUNCH_UPDATE");
-        let total_size = (pages.len() * page_size as usize) as u64;
         self.snp
-            .launch_update(&self.fd, 0, total_size, pages[0], page_type)
+            .launch_update(&self.fd, 0, total_size, pfns[0], page_type)
             .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        info!("KVM_SEV_SNP_LAUNCH_UPDATE done");
         Ok(())
     }
 
@@ -686,7 +723,8 @@ impl vm::Vm for KvmVm {
                 KVM_MEM_LOG_DIRTY_PAGES
             } else {
                 0
-            };
+            }
+            | KVM_MEM_GUEST_MEMFD;
         kvm_userspace_memory_region2 {
             slot,
             guest_phys_addr,
