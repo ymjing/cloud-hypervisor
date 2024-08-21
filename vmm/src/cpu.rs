@@ -833,6 +833,8 @@ impl CpuManager {
         #[cfg(feature = "sev_snp")]
         if self.sev_snp_enabled {
             if let Some((kernel_entry_point, _)) = boot_setup {
+                info!("Setting SEV Control Register - no op");
+                #[cfg(not(feature = "kvm"))]
                 vcpu.set_sev_control_register(
                     kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
                 )?;

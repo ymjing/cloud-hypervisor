@@ -2116,6 +2116,10 @@ impl Vm {
         // Load kernel synchronously or if asynchronous then wait for load to
         // finish.
         let entry_point = self.entry_point()?;
+        info!(
+            "VMBoot - Entrypoint: 0x{:x}",
+            entry_point.unwrap().entry_addr.0
+        );
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();

@@ -75,6 +75,8 @@ pub enum Error {
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
     #[error("Error decoding host data: {0}")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
+    #[error("Error applying VMSA to vCPU registers: {0}")]
+    SetVmsa(#[source] crate::cpu::Error),
 }
 
 #[allow(dead_code)]
@@ -173,7 +175,7 @@ pub fn load_igvm(
     let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
 
     #[cfg(feature = "sev_snp")]
-    let mut host_data_contents = [0; 32];
+    let mut host_data_contents = [0u8; 32];
     #[cfg(feature = "sev_snp")]
     if let Some(host_data_str) = host_data {
         hex::decode_to_slice(host_data_str, &mut host_data_contents as &mut [u8])
@@ -512,7 +514,20 @@ pub fn load_igvm(
             gpas.len()
         );
 
+        // Set vCPU initial states before calling SNP_LAUNCH_FINISH
+        info!("Setting SEV Control Register - early");
+        let vcpus = cpu_manager.lock().unwrap().vcpus();
+        for vcpu in vcpus {
+            vcpu.lock()
+                .unwrap()
+                .set_sev_control_register(0)
+                .map_err(Error::SetVmsa)?;
+        }
+
         now = Instant::now();
+
+        // FIXME: wait until for setting vCPU registers
+
         // Call Complete Isolated Import since we are done importing isolated pages
         memory_manager
             .lock()

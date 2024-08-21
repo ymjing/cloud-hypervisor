@@ -501,6 +501,7 @@ impl vm::Vm for KvmVm {
         pfns: &[u64],
         uaddrs: &[u64],
     ) -> vm::Result<()> {
+        assert_eq!(pfns.len(), uaddrs.len());
         if pfns.is_empty() {
             return Ok(());
         }
@@ -511,8 +512,10 @@ impl vm::Vm for KvmVm {
             pfns[0],
             pfns.len(),
         );
-
-        assert_eq!(pfns.len(), uaddrs.len());
+        if page_type == 2 {
+            // FIXME: do not handle VMSA page frame for now; becuase LAUNCH_UPDATE does not accept VMSA
+            return Ok(());
+        }
 
         for (pfn, uaddr) in pfns.iter().zip(uaddrs.iter()) {
             self.set_memory_attributes(
@@ -2612,8 +2615,81 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, _reg: u64) -> cpu::Result<()> {
-        // TODO: Read "SEV Control Register" from VMSA PFN; and then set KVM SEV control register
+    fn set_sev_control_register(&self, _vmsa_pfn: u64) -> cpu::Result<()> {
+        // FIXME: read registers from VMSA page
+        //let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
+
+        // https://github.com/qemu/qemu/blob/master/target/i386/cpu.h
+        const DESC_G_SHIFT: usize = 23;
+        const DESC_G_MASK: u32 = 1 << DESC_G_SHIFT;
+        const DESC_B_SHIFT: usize = 22;
+        const DESC_L_SHIFT: usize = 21; /* x86_64 only : 64 bit code segment */
+        const DESC_AVL_SHIFT: usize = 20;
+        const DESC_AVL_MASK: u32 = 1 << DESC_AVL_SHIFT;
+        const DESC_P_SHIFT: usize = 15;
+        const DESC_P_MASK: u32 = 1 << DESC_P_SHIFT;
+        const DESC_DPL_SHIFT: usize = 13;
+        const DESC_S_SHIFT: usize = 12;
+        const DESC_S_MASK: u32 = 1 << DESC_S_SHIFT;
+        const DESC_TYPE_SHIFT: usize = 8;
+
+        let vcpu = self.fd.lock().unwrap();
+
+        use kvm_bindings::kvm_segment as Segment;
+        fn make_segment(base: u64, limit: u32, selector: u16, flags: u32) -> Segment {
+            Segment {
+                base,
+                limit,
+                selector,
+                type_: ((flags >> DESC_TYPE_SHIFT) & 15) as u8,
+                present: ((flags & DESC_P_MASK) != 0) as u8,
+                dpl: ((flags >> DESC_DPL_SHIFT) & 3) as u8,
+                db: ((flags >> DESC_B_SHIFT) & 1) as u8,
+                s: ((flags & DESC_S_MASK) != 0) as u8,
+                l: ((flags >> DESC_L_SHIFT) & 1) as u8,
+                g: ((flags & DESC_G_MASK) != 0) as u8,
+                avl: ((flags & DESC_AVL_MASK) != 0) as u8,
+                ..Default::default()
+            }
+        }
+
+        let mut sregs = vcpu
+            .get_sregs()
+            .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
+        sregs.cs = make_segment(0xffff_0000, 0xffff, 0xf000, 0x9b);
+        sregs.ds = make_segment(0, 0xffff, 0, 0x93);
+        sregs.es = make_segment(0, 0xffff, 0, 0x93);
+        sregs.fs = make_segment(0, 0xffff, 0, 0x93);
+        sregs.gs = make_segment(0, 0xffff, 0, 0x93);
+        sregs.ss = make_segment(0, 0xffff, 0, 0x93);
+        sregs.tr = make_segment(0, 0xffff, 0, 0x8b);
+        sregs.ldt = make_segment(0, 0xffff, 0, 0);
+        sregs.gdt = kvm_bindings::kvm_dtable {
+            limit: 0xffff,
+            ..Default::default()
+        };
+        sregs.idt = kvm_bindings::kvm_dtable {
+            limit: 0xffff,
+            ..Default::default()
+        };
+        sregs.cr0 = 0x10;
+        sregs.cr4 = 0x40;
+
+        let _ = vcpu
+            .set_sregs(&sregs)
+            .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        let mut regs = vcpu
+            .get_regs()
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+        regs.rip = 0xfff0;
+        regs.rdx = 0x600;
+        regs.rflags = 0x2;
+
+        let _ = vcpu
+            .set_regs(&regs)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
         Ok(())
     }
 }
