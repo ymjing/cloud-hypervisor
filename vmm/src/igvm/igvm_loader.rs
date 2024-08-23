@@ -526,6 +526,42 @@ pub fn load_igvm(
                 .map_err(Error::ImportIsolatedPages)?;
         }
 
+        {
+            // FIXME: load demo code
+            info!("Load dummy code");
+            const CODE: &[u8] = &[
+                0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
+                0x00, 0xd8, /* add %bl, %al */
+                0x04, b'0', /* add $'0', %al */
+                0xf4, /* hlt */
+            ];
+            const CODE_GPA: u64 = 0xA000;
+            loader
+                .import_pages(
+                    CODE_GPA / HV_PAGE_SIZE,
+                    1,
+                    BootPageAcceptance::ExclusiveUnmeasured,
+                    CODE,
+                )
+                .map_err(Error::Loader)?;
+            let memory_manager = memory_manager.lock().unwrap();
+            let guest_memory = memory_manager.guest_memory().memory();
+            let (hva_base, hva_offset) = guest_memory
+                .to_region_addr(GuestAddress(0x1000))
+                .expect("failed to get hva");
+            let hva_base = hva_base.as_ptr() as u64;
+            let hva = hva_base + hva_offset.0;
+            memory_manager
+                .vm
+                .import_isolated_pages(
+                    IsolatedPageType::Normal as u32,
+                    HV_PAGE_SIZE as u32,
+                    &vec![CODE_GPA >> ISOLATED_PAGE_SHIFT],
+                    &vec![hva],
+                )
+                .map_err(Error::ImportIsolatedPages)?;
+        }
+
         info!(
             "Time it took to for hashing pages {:.2?} and page_count {:?}",
             now.elapsed(),

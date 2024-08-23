@@ -2619,6 +2619,9 @@ impl cpu::Vcpu for KvmVcpu {
         //let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
 
         info!("set_sev_control_registers");
+        let vcpu = self.fd.lock().unwrap();
+
+        /*use kvm_bindings::kvm_segment as Segment;
 
         // https://github.com/qemu/qemu/blob/master/target/i386/cpu.h
         const DESC_G_SHIFT: usize = 23;
@@ -2634,9 +2637,6 @@ impl cpu::Vcpu for KvmVcpu {
         const DESC_S_MASK: u32 = 1 << DESC_S_SHIFT;
         const DESC_TYPE_SHIFT: usize = 8;
 
-        let vcpu = self.fd.lock().unwrap();
-
-        use kvm_bindings::kvm_segment as Segment;
         fn make_segment(base: u64, limit: u32, selector: u16, flags: u32) -> Segment {
             Segment {
                 base,
@@ -2672,10 +2672,14 @@ impl cpu::Vcpu for KvmVcpu {
             .set_sregs(&sregs)
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
 
+        */
+
         let mut regs = vcpu
             .get_regs()
             .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
-        regs.rip = 0xfff0;
+        //regs.rip = 0xfff0;
+
+        regs.rip = 0xA000;
         regs.rdx = 0x600;
         regs.rflags = 0x2;
 

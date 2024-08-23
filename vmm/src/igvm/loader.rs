@@ -99,6 +99,7 @@ impl Loader {
         // Track accepted ranges for duplicate imports.
         self.accept_new_range(page_base, page_count, acceptance)?;
 
+        info!("Writing page to gpa: 0x{:x}", page_base * HV_PAGE_SIZE);
         let bytes_written = self
             .memory
             .memory()
