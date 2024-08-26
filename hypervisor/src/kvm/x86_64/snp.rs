@@ -102,7 +102,7 @@ impl SnpFd {
             1 << 16 |  // SMT
             1 << 17 |  // MB1
             0 << 18 |  // MIGRATE_MA
-            1 << 19;
+            1 << 19; // DEBUG
         let mut start: KvmSevSnpLaunchStart = KvmSevSnpLaunchStart {
             policy,
             ..Default::default()

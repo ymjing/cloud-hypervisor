@@ -1045,8 +1045,10 @@ impl Vm {
         cfg_if::cfg_if! {
             if #[cfg(feature = "sev_snp")] {
                 let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
+                    info!("Using vmsa_gpa as entrypoint");
                     EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa), setup_header: None }
                 } else {
+                    info!("Using vmsa_rip as entrypoint");
                     EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None }
                 };
             } else {
@@ -2089,8 +2091,7 @@ impl Vm {
                     // In case of SEV-SNP guest ACPI tables are provided via
                     // IGVM. So skip the creation of ACPI tables and set the
                     // rsdp addr to None.
-                    // None
-                    self.create_acpi_tables() // FIXME: use IGVM-provided ACPI table
+                    None
                 } else {
                     self.create_acpi_tables()
                 };
@@ -2141,6 +2142,10 @@ impl Vm {
         // On aarch64 the ACPI tables depend on the vCPU mpidr which is only
         // available after they are configured
         #[cfg(target_arch = "aarch64")]
+        let rsdp_addr = self.create_acpi_tables();
+
+        // FIXME: do we create ACPI table for SNP or not?
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
         let rsdp_addr = self.create_acpi_tables();
 
         // Configure shared state based on loaded kernel
