@@ -780,8 +780,17 @@ impl vm::Vm for KvmVm {
         unsafe {
             self.fd
                 .set_user_memory_region2(region)
-                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
+
+        #[cfg(feature = "sev_snp")]
+        // FIXME: check if all pages have to be private for SNP guests, including VFIO
+        self.set_memory_attributes(
+            region.guest_phys_addr,
+            region.memory_size,
+            kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+        )?;
+        Ok(())
     }
 
     ///
