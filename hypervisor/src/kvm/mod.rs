@@ -2629,36 +2629,42 @@ impl cpu::Vcpu for KvmVcpu {
 
         info!("set_sev_control_registers");
 
-        // https://github.com/qemu/qemu/blob/master/target/i386/cpu.h
-        const DESC_G_SHIFT: usize = 23;
-        const DESC_G_MASK: u32 = 1 << DESC_G_SHIFT;
-        const DESC_B_SHIFT: usize = 22;
-        const DESC_L_SHIFT: usize = 21; /* x86_64 only : 64 bit code segment */
-        const DESC_AVL_SHIFT: usize = 20;
-        const DESC_AVL_MASK: u32 = 1 << DESC_AVL_SHIFT;
-        const DESC_P_SHIFT: usize = 15;
-        const DESC_P_MASK: u32 = 1 << DESC_P_SHIFT;
-        const DESC_DPL_SHIFT: usize = 13;
-        const DESC_S_SHIFT: usize = 12;
-        const DESC_S_MASK: u32 = 1 << DESC_S_SHIFT;
-        const DESC_TYPE_SHIFT: usize = 8;
-
         let vcpu = self.fd.lock().unwrap();
 
         use kvm_bindings::kvm_segment as Segment;
-        fn make_segment(base: u64, limit: u32, selector: u16, flags: u32) -> Segment {
+
+        bitfield::bitfield! {
+            /// Guest segment register access right.
+            ///
+            /// See Intel Architecture Software Developer's Manual, Vol.3, Table 24-2.
+            #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+            pub struct SegAccess(u32);
+            impl Debug;
+            pub seg_type, _ : 3, 0;
+            pub s_code_data, _ : 4;
+            pub priv_level, _ : 6, 5;
+            pub present, _ : 7;
+            pub available, _ : 12;
+            pub l_64bit, _ : 13;
+            pub db_size_32, _: 14;
+            pub granularity, _: 15;
+            pub unusable, _: 16;
+        }
+
+        fn make_segment(base: u64, limit: u32, selector: u16, flags: SegAccess) -> Segment {
             Segment {
                 base,
                 limit,
                 selector,
-                type_: ((flags >> DESC_TYPE_SHIFT) & 15) as u8,
-                present: ((flags & DESC_P_MASK) != 0) as u8,
-                dpl: ((flags >> DESC_DPL_SHIFT) & 3) as u8,
-                db: ((flags >> DESC_B_SHIFT) & 1) as u8,
-                s: ((flags & DESC_S_MASK) != 0) as u8,
-                l: ((flags >> DESC_L_SHIFT) & 1) as u8,
-                g: ((flags & DESC_G_MASK) != 0) as u8,
-                avl: ((flags & DESC_AVL_MASK) != 0) as u8,
+                type_: flags.seg_type() as u8,
+                s: flags.s_code_data() as u8,
+                dpl: flags.priv_level() as u8,
+                present: flags.present() as u8,
+                avl: flags.available() as u8,
+                db: flags.db_size_32() as u8,
+                g: flags.granularity() as u8,
+                l: flags.l_64bit() as u8,
+                unusable: flags.unusable() as u8,
                 ..Default::default()
             }
         }
@@ -2666,16 +2672,22 @@ impl cpu::Vcpu for KvmVcpu {
         let mut sregs = vcpu
             .get_sregs()
             .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
-        sregs.cs = make_segment(0xffff_0000, 0xffff, 0xf000, 0x9b);
-        sregs.ds = make_segment(0, 0xffff, 0, 0x93);
-        sregs.es = make_segment(0, 0xffff, 0, 0x93);
-        sregs.fs = make_segment(0, 0xffff, 0, 0x93);
-        sregs.gs = make_segment(0, 0xffff, 0, 0x93);
-        sregs.ss = make_segment(0, 0xffff, 0, 0x93);
-        sregs.tr = make_segment(0, 0xffff, 0, 0x8b);
+        sregs.cs = make_segment(0xffff_0000, 0xffff, 0xf000, SegAccess(0x9a));
+        info!("CS: {:?}", sregs.cs);
+        sregs.ds = make_segment(0, 0xffff, 0, SegAccess(0x93));
+        sregs.es = make_segment(0, 0xffff, 0, SegAccess(0x93));
+        sregs.fs = make_segment(0, 0xffff, 0, SegAccess(0x93));
+        sregs.gs = make_segment(0, 0xffff, 0, SegAccess(0x93));
+        sregs.ss = make_segment(0, 0xffff, 0, SegAccess(0x92));
+        sregs.tr = make_segment(0, 0xffff, 0, SegAccess(0x83));
+        sregs.ldt = make_segment(0, 0xffff, 0, SegAccess(0x82));
 
-        sregs.cr0 = 0x10;
-        sregs.cr4 = 0x40;
+        sregs.cr0 = 0x6000_0010; // ET | NW | CD
+
+        sregs.idt.base = 0;
+        sregs.idt.limit = 0xffff;
+        sregs.gdt.base = 0;
+        sregs.gdt.limit = 0xffff;
 
         let _ = vcpu
             .set_sregs(&sregs)
