@@ -406,7 +406,6 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
-
     /// Pause the VM
     fn pause(&self) -> Result<()> {
         Ok(())
