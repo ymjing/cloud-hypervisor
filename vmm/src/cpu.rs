@@ -840,9 +840,12 @@ impl CpuManager {
                 )?;
             }
 
+            //TODO: set up CPUID for SEV-SNP
+            // create vcpu.configure_sev_snp(self.cpuid.clone)
+
             // Traditional way to configure vcpu doesn't work for SEV-SNP guests.
             // All the vCPU configuration for SEV-SNP guest is provided via VMSA.
-            return Ok(());
+            //return Ok(());
         }
 
         #[cfg(target_arch = "x86_64")]

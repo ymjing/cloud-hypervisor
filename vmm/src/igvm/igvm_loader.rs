@@ -262,11 +262,11 @@ pub fn load_igvm(
                     IgvmPageDataType::CPUID_DATA => {
                         info!("PageData - CPUID - GPA: 0x{:x}", *gpa);
                         // SAFETY: CPUID is readonly
+
                         /*unsafe {
                             let cpuid_page_p: *mut hv_psp_cpuid_page =
                                 data.as_ptr() as *mut hv_psp_cpuid_page; // as *mut hv_psp_cpuid_page;
                             let cpuid_page: &mut hv_psp_cpuid_page = &mut *cpuid_page_p;
-                            // FIXME: use KVM data structure to process CPUID_DATA
                             for i in 0..cpuid_page.count {
                                 let leaf = cpuid_page.cpuid_leaf_info[i as usize];
                                 let mut in_leaf = cpu_manager
@@ -300,9 +300,47 @@ pub fn load_igvm(
                     _ => todo!("unsupported IgvmPageDataType"),
                 };
 
-                loader
-                    .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
-                    .map_err(Error::Loader)?;
+                if *data_type == IgvmPageDataType::CPUID_DATA {
+                    use zerocopy::{AsBytes, FromBytes, FromZeroes};
+                    #[repr(C)]
+                    #[derive(Debug, Clone, PartialEq, Eq, FromZeroes, FromBytes, AsBytes)]
+                    pub struct SnpCpuidFunc {
+                        pub eax_in: u32,
+                        pub ecx_in: u32,
+                        pub xcr0_in: u64,
+                        pub xss_in: u64,
+                        pub eax: u32,
+                        pub ebx: u32,
+                        pub ecx: u32,
+                        pub edx: u32,
+                        pub reserved: u64,
+                    }
+
+                    #[repr(C)]
+                    #[derive(Debug, Clone, FromZeroes, FromBytes, AsBytes)]
+                    pub struct SnpCpuidInfo {
+                        pub count: u32,
+                        pub _reserved1: u32,
+                        pub _reserved2: u64,
+                        pub entries: [SnpCpuidFunc; 64],
+                    }
+                    let mut snp_cpu_id_info = SnpCpuidInfo::new_zeroed();
+                    snp_cpu_id_info.count = 1;
+
+                    // Write SnpCpuidInfo to the CPUID page
+                    loader
+                        .import_pages(
+                            gpa / HV_PAGE_SIZE,
+                            1,
+                            acceptance,
+                            snp_cpu_id_info.as_bytes(),
+                        )
+                        .map_err(Error::Loader)?;
+                } else {
+                    loader
+                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
+                        .map_err(Error::Loader)?;
+                }
             }
             IgvmDirectiveHeader::ParameterArea {
                 number_of_bytes,

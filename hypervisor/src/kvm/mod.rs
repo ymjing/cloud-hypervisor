@@ -2682,7 +2682,11 @@ impl cpu::Vcpu for KvmVcpu {
         sregs.tr = make_segment(0, 0xffff, 0, SegAccess(0x83));
         sregs.ldt = make_segment(0, 0xffff, 0, SegAccess(0x82));
 
-        sregs.cr0 = 0x6000_0010; // ET | NW | CD
+        //sregs.cr0 = 0x6000_0010; // ET | NW | CD
+
+        sregs.cr0 = 0x10;
+        sregs.cr4 = 0x40;
+        sregs.efer = 0x1000;
 
         sregs.idt.base = 0;
         sregs.idt.limit = 0xffff;
