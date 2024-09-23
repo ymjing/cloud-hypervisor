@@ -285,6 +285,7 @@ impl CpuidPatch {
         for entry in cpuid.iter_mut() {
             if entry.function == function && (index.is_none() || index.unwrap() == entry.index) {
                 entry_found = true;
+                info!("set_cpuid_reg: found function: 0x{:x}", entry.function);
                 match reg {
                     CpuidReg::EAX => {
                         entry.eax = value;
@@ -839,6 +840,26 @@ pub fn configure_vcpu(
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, x2apic_id);
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, x2apic_id);
+
+    // FIXME: SNP specific CPUIDs
+    CpuidPatch::set_cpuid_reg(
+        &mut cpuid,
+        0x8000_001f,
+        None,
+        CpuidReg::EAX,
+        0x2 | 0x8 | 0x10,
+    );
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001f, None, CpuidReg::ECX, 0);
+    CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001f, None, CpuidReg::EDX, 0);
+    let host_ebx = unsafe { x86_64::__cpuid(0x8000_001f) }.ebx;
+    CpuidPatch::set_cpuid_reg(
+        &mut cpuid,
+        0x8000_001f,
+        None,
+        CpuidReg::EBX,
+        (1 << 6) | (host_ebx & 0x3f),
+    );
+
     if matches!(cpu_vendor, CpuVendor::AMD) {
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001e, Some(0), CpuidReg::EAX, x2apic_id);
     }
@@ -896,9 +917,9 @@ pub fn configure_vcpu(
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
-        regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
+        // regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
+        // regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())

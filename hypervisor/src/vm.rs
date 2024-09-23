@@ -172,6 +172,11 @@ pub enum HypervisorVmError {
     #[error("Failed to write to IO Bus: {0}")]
     IoBusWrite(#[source] anyhow::Error),
     ///
+    /// Set memory attributes
+    ///
+    #[error("Failed to set memory attributes: {0}")]
+    SetMemoryAttributes(#[source] anyhow::Error),
+    ///
     /// Start dirty log error
     ///
     #[error("Failed to get dirty log: {0}")]
@@ -387,6 +392,7 @@ pub trait Vm: Send + Sync + Any {
         _page_type: u32,
         _page_size: u32,
         _pages: &[u64],
+        _uaddrs: &[u64],
     ) -> Result<()> {
         unimplemented!()
     }
@@ -400,7 +406,6 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
-
     /// Pause the VM
     fn pause(&self) -> Result<()> {
         Ok(())

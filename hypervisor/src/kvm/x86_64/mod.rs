@@ -8,6 +8,9 @@
 //
 //
 
+#[cfg(feature = "sev_snp")]
+pub mod snp;
+
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
     XsaveState, CPUID_FLAG_VALID_INDEX,

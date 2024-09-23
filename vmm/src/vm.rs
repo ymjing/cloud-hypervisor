@@ -866,6 +866,18 @@ impl Vm {
             .map_err(Error::MemoryManager)?
         };
 
+        #[cfg(target_arch = "x86_64")]
+        // Note: For x86, always call this function before invoking start boot vcpus.
+        // Otherwise guest would fail to boot because we haven't created the
+        // userspace mappings to update the hypervisor about the memory mappings.
+        // These mappings must be created before we start the vCPU threads for
+        // the very first time.
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
         Vm::new_from_memory_manager(
             vm_config,
             memory_manager,
@@ -1025,11 +1037,18 @@ impl Vm {
         )
         .map_err(Error::IgvmLoad)?;
 
+        info!(
+            "Igvm Loaded: vmsa_gpa: 0x{:x}, rip: 0x{:x}",
+            res.vmsa_gpa, res.vmsa.rip
+        );
+
         cfg_if::cfg_if! {
             if #[cfg(feature = "sev_snp")] {
                 let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
+                    info!("Using vmsa_gpa as entrypoint");
                     EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa), setup_header: None }
                 } else {
+                    info!("Using vmsa_rip as entrypoint");
                     EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None }
                 };
             } else {
@@ -2084,6 +2103,10 @@ impl Vm {
         // Load kernel synchronously or if asynchronous then wait for load to
         // finish.
         let entry_point = self.entry_point()?;
+        info!(
+            "VMBoot - Entrypoint: 0x{:x}",
+            entry_point.unwrap().entry_addr.0
+        );
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
@@ -2121,6 +2144,10 @@ impl Vm {
         #[cfg(target_arch = "aarch64")]
         let rsdp_addr = self.create_acpi_tables();
 
+        // FIXME: do we create ACPI table for SNP or not?
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        let rsdp_addr = self.create_acpi_tables();
+
         // Configure shared state based on loaded kernel
         entry_point
             .map(|entry_point| {
@@ -2130,17 +2157,7 @@ impl Vm {
             })
             .transpose()?;
 
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+        // FIXME: moved allocate_address_space() above
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {

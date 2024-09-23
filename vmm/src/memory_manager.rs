@@ -881,6 +881,7 @@ impl MemoryManager {
     }
 
     pub fn allocate_address_space(&mut self) -> Result<(), Error> {
+        info!("Allocating address space");
         let mut list = Vec::new();
 
         for (zone_id, memory_zone) in self.memory_zones.iter() {
